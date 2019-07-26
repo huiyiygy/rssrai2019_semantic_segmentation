@@ -8,3 +8,9 @@ __pycache__/
 
 # ignore running results folder
 run/
+
+# ignore ipynb checkpoints folder
+./ipynb_checkpoints
+
+# ignore datasets folder
+dataloaders/datasets/
