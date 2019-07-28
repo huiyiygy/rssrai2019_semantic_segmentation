@@ -48,8 +48,8 @@ class Saver(object):
         p = OrderedDict()
         p['dataset'] = self.args.dataset
         p['backbone'] = self.args.backbone
-        p['lr'] = self.args.lr
-        p['lr_scheduler'] = self.args.lr_scheduler
+        p['learn_rate'] = self.args.learn_rate
+        # p['lr_scheduler'] = self.args.lr_scheduler
         p['loss_type'] = self.args.loss_type
         p['epoch'] = self.args.epochs
         p['base_size'] = self.args.base_size

@@ -19,7 +19,7 @@ from models.backbone.UNet import UNet
 from utils.calculate_weights import calculate_weigths_labels
 from utils.loss import SegmentationLosses
 from utils.metrics import Evaluator
-from utils.lr_scheduler import LR_Scheduler
+# from utils.lr_scheduler import LR_Scheduler
 from models.sync_batchnorm.replicate import patch_replication_callback
 
 
@@ -42,11 +42,13 @@ class Trainer(object):
         model = UNet(in_channels=4, n_classes=self.nclass, sync_bn=args.sync_bn)
         print("using UNet")
 
-        train_params = [{'params': model.get_params(), 'lr': args.lr}]
+        # train_params = [{'params': model.get_params(), 'lr': args.lr}]
+        train_params = [{'params': model.get_params()}]
 
         # Define Optimizer
-        optimizer = torch.optim.SGD(train_params, momentum=args.momentum,
-                                    weight_decay=args.weight_decay, nesterov=args.nesterov)
+        # optimizer = torch.optim.SGD(train_params, momentum=args.momentum,
+        #                             weight_decay=args.weight_decay, nesterov=args.nesterov)
+        optimizer = torch.optim.Adam(train_params, self.args.learn_rate, weight_decay=0, amsgrad=False)
 
         # Define Criterion
         # whether to use class balanced weights
@@ -65,7 +67,7 @@ class Trainer(object):
         # Define Evaluator
         self.evaluator = Evaluator(self.nclass)
         # Define lr scheduler
-        self.scheduler = LR_Scheduler(args.lr_scheduler, args.lr, args.epochs, len(self.train_loader))
+        # self.scheduler = LR_Scheduler(args.lr_scheduler, args.lr, args.epochs, len(self.train_loader))
 
         # Using cuda
         if args.cuda:
@@ -95,6 +97,7 @@ class Trainer(object):
             args.start_epoch = 0
 
     def training(self, epoch):
+        print('[Epoch: %d, previous best = %.4f]' % (epoch, self.best_pred))
         train_loss = 0.0
         self.model.train()
         self.evaluator.reset()
@@ -105,7 +108,7 @@ class Trainer(object):
             image, target = sample['image'], sample['label']
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
-            self.scheduler(self.optimizer, i, epoch, self.best_pred)
+            # self.scheduler(self.optimizer, i, epoch, self.best_pred)
             self.optimizer.zero_grad()
             output = self.model(image)
             loss = self.criterion(output, target)
@@ -132,10 +135,10 @@ class Trainer(object):
         self.writer.add_scalar('train/fwIoU', FWIoU, epoch)
         self.writer.add_scalar('train/total_loss_epoch', train_loss, epoch)
 
-        print('Validation:')
-        print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
+        print('train validation:')
         print("Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(Acc, Acc_class, mIoU, FWIoU))
         print('Loss: %.3f' % train_loss)
+        print('---------------------------------')
 
     def validation(self, epoch):
         test_loss = 0.0
@@ -168,10 +171,10 @@ class Trainer(object):
         self.writer.add_scalar('val/Acc', Acc, epoch)
         self.writer.add_scalar('val/Acc_class', Acc_class, epoch)
         self.writer.add_scalar('val/fwIoU', FWIoU, epoch)
-        print('Validation:')
-        print('[Epoch: %d, numImages: %5d]' % (epoch, i * self.args.batch_size + image.data.shape[0]))
+        print('test validation:')
         print("Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(Acc, Acc_class, mIoU, FWIoU))
         print('Loss: %.3f' % test_loss)
+        print('====================================')
 
         new_pred = mIoU
         if new_pred > self.best_pred:
@@ -218,7 +221,7 @@ def main():
     parser.add_argument('--use-balanced-weights', action='store_true', default=False,
                         help='whether to use balanced weights (default: False)')
     # optimizer params
-    parser.add_argument('--lr', type=float, default=None, metavar='LR',
+    parser.add_argument('--learn-rate', type=float, default=None, metavar='LR',
                         help='learning rate (default: auto)')
     parser.add_argument('--lr-scheduler', type=str, default='poly',
                         choices=['poly', 'step', 'cos'],
@@ -275,9 +278,9 @@ def main():
     if args.test_batch_size is None:
         args.test_batch_size = args.batch_size
 
-    if args.lr is None:
+    if args.learn_rate is None:
         lrs = {'rssrai2019': 0.01}
-        args.lr = lrs[args.dataset.lower()] / (4 * len(args.gpu_ids)) * args.batch_size
+        args.learn_rate = lrs[args.dataset.lower()] / (4 * len(args.gpu_ids)) * args.batch_size
 
     if args.checkname is None:
         args.checkname = str(args.backbone)
@@ -287,6 +290,7 @@ def main():
     trainer = Trainer(args)
     print('Starting Epoch:', trainer.args.start_epoch)
     print('Total Epoches:', trainer.args.epochs)
+    print('====================================')
     for epoch in range(trainer.args.start_epoch, trainer.args.epochs):
         trainer.training(epoch)
         if epoch % args.eval_interval == (args.eval_interval - 1):
