@@ -27,6 +27,7 @@ class UNet(nn.Module):
         self.conv3 = UnetConv2(filters[1], filters[2], self.batchnorm)
         self.conv4 = UnetConv2(filters[2], filters[3], self.batchnorm)
         self.center = UnetConv2(filters[3], filters[4], self.batchnorm)
+        self.dropout = nn.Dropout(0.5)
         # upsampling
         self.up_concat4 = UnetUp(filters[4], filters[3], self.is_deconv)
         self.up_concat3 = UnetUp(filters[3], filters[2], self.is_deconv)
@@ -52,6 +53,7 @@ class UNet(nn.Module):
         maxpool4 = self.maxpool(conv4)       # 128*32*32
 
         center = self.center(maxpool4)       # 256*32*32
+        center = self.dropout(center)
 
         up4 = self.up_concat4(center, conv4)  # 128*64*64
         up3 = self.up_concat3(up4, conv3)     # 64*128*128
@@ -74,7 +76,6 @@ class UNet(nn.Module):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
             elif isinstance(m, nn.BatchNorm2d):
-                # nn.init.normal_(m.weight.data, 1.0, 0.02)
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 

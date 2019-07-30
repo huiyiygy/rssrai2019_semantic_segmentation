@@ -1,6 +1,7 @@
 numpy
 matplotlib
 pillow
+py-opencv
 tensorboardX
 torch
 torchvision

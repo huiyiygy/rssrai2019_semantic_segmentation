@@ -145,6 +145,7 @@ class Trainer(object):
         self.model.eval()
         self.evaluator.reset()
         tbar = tqdm(self.val_loader, desc='\r')
+        num_img_val = len(self.val_loader)
 
         for i, sample in enumerate(tbar):
             image, target = sample['image'], sample['label']
@@ -155,6 +156,7 @@ class Trainer(object):
             loss = self.criterion(output, target)
             test_loss += loss.item()
             tbar.set_description('Test loss: %.5f' % (test_loss / (i + 1)))
+            self.writer.add_scalar('val/total_loss_iter', loss.item(), i + num_img_val * epoch)
             pred = output.data.cpu().numpy()
             target = target.cpu().numpy()
             pred = np.argmax(pred, axis=1)

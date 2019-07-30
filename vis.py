@@ -74,6 +74,8 @@ def main():
                         metavar='N', help='dataloader threads')
     parser.add_argument('--batch-size', type=int, default=1,
                         metavar='N', help='input batch size for testing (default: auto)')
+    parser.add_argument('--test-batch-size', type=int, default=1, metavar='N',
+                        help='input batch size for testing (default: auto)')
 
     parser.add_argument('--crop-size', type=int, default=400,
                         help='crop image size')

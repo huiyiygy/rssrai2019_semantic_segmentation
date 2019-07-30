@@ -2,6 +2,7 @@
 import torch
 import random
 import numpy as np
+import cv2
 
 from PIL import Image, ImageOps, ImageFilter
 
@@ -56,7 +57,7 @@ class RandomHorizontalFlip(object):
     def __call__(self, sample):
         img = sample['image']
         mask = sample['label']
-        if random.random() < 0.5:
+        if random.random() < 0.25:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
             mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
 
@@ -68,7 +69,7 @@ class RandomVerticalFlip(object):
     def __call__(self, sample):
         img = sample['image']
         mask = sample['label']
-        if random.random() < 0.5:
+        if random.random() < 0.25:
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
             mask = mask.transpose(Image.FLIP_TOP_BOTTOM)
 
@@ -93,6 +94,20 @@ class RandomRotate(object):
                 'label': mask}
 
 
+class RandomGammaTransform(object):
+    def __call__(self, sample):
+        img = sample['image']
+        img_np = np.array(img, dtype=np.uint8)
+        alpha = np.random.uniform(-np.e, np.e)
+        gamma = np.exp(alpha)
+        gamma_table = [np.power(x / 255.0, gamma) * 255.0 for x in range(256)]
+        gamma_table = np.round(np.array(gamma_table)).astype(np.uint8)
+        img_np = cv2.LUT(img_np, gamma_table)
+        img = Image.fromarray(img_np, mode='CMYK')
+        sample['image'] = img
+        return sample
+
+
 class RandomGaussianBlur(object):
     def __call__(self, sample):
         img = sample['image']
@@ -103,6 +118,20 @@ class RandomGaussianBlur(object):
 
         return {'image': img,
                 'label': mask}
+
+
+class RandomNoise(object):
+    def __call__(self, sample):
+        img = sample['image']
+        w, h = img.size
+        img_np = np.array(img, dtype=np.uint8)
+        for i in range(5000):  # 噪声点个数
+            x = np.random.randint(0, w)
+            y = np.random.randint(0, h)
+            img_np[x, y] = 255
+        img = Image.fromarray(img_np, mode='CMYK')
+        sample['image'] = img
+        return sample
 
 
 class RandomScaleCrop(object):

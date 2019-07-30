@@ -66,10 +66,13 @@ class RssraiSegmentation(data.Dataset):
     def transform_train(self, sample):
         composed_transforms = transforms.Compose([
             tr.RandomHorizontalFlip(),
+            tr.RandomVerticalFlip(),
             # tr.RandomScaleCrop(base_size=self.args.base_size, crop_size=self.args.crop_size, fill=255),
-            tr.FixedResize(size=self.args.crop_size),
+            # tr.FixedResize(size=self.args.crop_size),
             tr.RandomRotate(),
+            tr.RandomGammaTransform(),
             tr.RandomGaussianBlur(),
+            tr.RandomNoise(),
             tr.Normalize(mean=(0.544650, 0.352033, 0.384602, 0.352311), std=(0.249456, 0.241652, 0.228824, 0.227583)),
             tr.ToTensor()])
 
@@ -78,7 +81,7 @@ class RssraiSegmentation(data.Dataset):
     def transform_val(self, sample):
         composed_transforms = transforms.Compose([
             # tr.FixScaleCrop(crop_size=self.args.crop_size),
-            tr.FixedResize(size=self.args.crop_size),
+            # tr.FixedResize(size=self.args.crop_size),
             tr.Normalize(mean=(0.544650, 0.352033, 0.384602, 0.352311), std=(0.249456, 0.241652, 0.228824, 0.227583)),
             tr.ToTensor()])
 
@@ -86,7 +89,7 @@ class RssraiSegmentation(data.Dataset):
 
     def transform_test(self, sample):
         composed_transforms = transforms.Compose([
-            tr.FixedResize(size=self.args.crop_size),
+            # tr.FixedResize(size=self.args.crop_size),
             tr.Normalize(mean=(0.544650, 0.352033, 0.384602, 0.352311), std=(0.249456, 0.241652, 0.228824, 0.227583)),
             tr.ToTensor()])
 
