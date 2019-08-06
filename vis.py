@@ -61,6 +61,82 @@ class Visualization(object):
             pred_img.save(os.path.join(self.args.vis_logdir, 'raw_train_id', filename))
             rgb_img.save(os.path.join(self.args.vis_logdir, 'vis_color', filename))
 
+    def transform_test(self, img):
+        # Normalize
+        mean = (0.544650, 0.352033, 0.384602, 0.352311)
+        std = (0.249456, 0.241652, 0.228824, 0.227583)
+        img = np.array(img).astype(np.float32)
+        img /= 255.0
+        img -= mean
+        img /= std
+        # ToTensor
+        img = np.array(img).astype(np.float32).transpose((2, 0, 1))
+        img = np.array([img, ])
+        img = torch.from_numpy(img).float()
+        return img
+
+    def predict(self, img: np.array) -> np.array:
+        img = self.transform_test(img)
+        if self.args.cuda:
+            img = img.cuda()
+        with torch.no_grad():
+            output = self.model(img)
+        pred = output.data.cpu().numpy()
+        return pred
+
+    def multi_scale_predict(self):
+        import cv2
+        test_dir = r'/home/lab/ygy/rssrai2019/datasets/image/test_crop'
+        files = os.listdir(test_dir)
+        self.model.eval()
+        tbar = tqdm(files, desc='\r')
+
+        for i, filename in enumerate(tbar):
+            image_predict_prob_list = []
+            image_ori = Image.open(os.path.join(test_dir, filename))
+
+            # 预测原图
+            sample_ori = image_ori.copy()
+            pred = self.predict(sample_ori)[0]
+            ori_pred = np.argmax(pred, axis=0)
+            image_predict_prob_list.append(pred)
+
+            # 预测旋转三个
+            angle_list = [90, 180, 270]
+            for angle in angle_list:
+                img_rotate = image_ori.rotate(angle, Image.BILINEAR)
+                pred = self.predict(img_rotate)[0]
+                pred = pred.transpose((1, 2, 0))
+                m_rotate = cv2.getRotationMatrix2D((200, 200), 360.0-angle, 1)
+                pred = cv2.warpAffine(pred, m_rotate, (400, 400))
+                pred = pred.transpose((2, 0, 1))
+                image_predict_prob_list.append(pred)
+
+            # 预测竖直翻转
+            img_flip = image_ori.transpose(Image.FLIP_TOP_BOTTOM)
+            pred = self.predict(img_flip)[0]
+            pred = cv2.flip(pred, 0)
+            image_predict_prob_list.append(pred)
+
+            # 预测水平翻转
+            img_flip = image_ori.transpose(Image.FLIP_LEFT_RIGHT)
+            pred = self.predict(img_flip)[0]
+            pred = cv2.flip(pred, 1)
+            image_predict_prob_list.append(pred)
+
+            # 求和平均
+            final_predict_prob = sum(image_predict_prob_list) / len(image_predict_prob_list)
+            final_pred = np.argmax(final_predict_prob, axis=0)
+
+            rgb_ori = decode_segmap(ori_pred, self.args.dataset)
+            rgb = decode_segmap(final_pred, self.args.dataset)
+            pred_img = Image.fromarray(final_pred, mode='1')
+            rgb_ori_img = Image.fromarray(rgb_ori, mode='RGB')
+            rgb_img = Image.fromarray(rgb, mode='RGB')
+            pred_img.save(os.path.join(self.args.vis_logdir, 'raw_train_id', filename))
+            rgb_ori_img.save(os.path.join(self.args.vis_logdir, 'vis_color_ori', filename))
+            rgb_img.save(os.path.join(self.args.vis_logdir, 'vis_color', filename))
+
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch DeeplabV3Plus Training")
