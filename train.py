@@ -43,12 +43,12 @@ class Trainer(object):
         print("using UNet")
 
         # train_params = [{'params': model.get_params(), 'lr': args.lr}]
-        train_params = [{'params': model.get_params()}]
+        self.train_params = [{'params': model.get_params()}]
 
         # Define Optimizer
         # optimizer = torch.optim.SGD(train_params, momentum=args.momentum,
         #                             weight_decay=args.weight_decay, nesterov=args.nesterov)
-        optimizer = torch.optim.Adam(train_params, self.args.learn_rate, weight_decay=0, amsgrad=False)
+        optimizer = torch.optim.Adam(self.train_params, self.args.learn_rate, weight_decay=args.weight_decay, amsgrad=True)
 
         # Define Criterion
         # whether to use class balanced weights
@@ -97,7 +97,10 @@ class Trainer(object):
             args.start_epoch = 0
 
     def training(self, epoch):
-        print('[Epoch: %d, previous best = %.4f]' % (epoch, self.best_pred))
+        if (epoch+1) == (self.args.epochs * 0.5) or (epoch+1) == (self.args.epochs * 0.8):
+            self.args.learn_rate *= 0.3
+            self.optimizer = torch.optim.Adam(self.train_params, self.args.learn_rate, weight_decay=self.args.weight_decay, amsgrad=True)
+        print('[Epoch: %d, learning rate: %.6f, previous best = %.4f]' % (epoch, self.args.learn_rate, self.best_pred))
         train_loss = 0.0
         self.model.train()
         self.evaluator.reset()

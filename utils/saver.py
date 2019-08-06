@@ -50,6 +50,7 @@ class Saver(object):
         p['backbone'] = self.args.backbone
         p['learn_rate'] = self.args.learn_rate
         # p['lr_scheduler'] = self.args.lr_scheduler
+        p['weight_decay'] = self.args.weight_decay
         p['loss_type'] = self.args.loss_type
         p['epoch'] = self.args.epochs
         p['base_size'] = self.args.base_size
