@@ -55,7 +55,7 @@ class Visualization(object):
             pred = np.argmax(pred, axis=1)[0]
 
             rgb = decode_segmap(pred, self.args.dataset)
-            pred_img = Image.fromarray(pred, mode='1')
+            pred_img = Image.fromarray(pred, mode='L')
             rgb_img = Image.fromarray(rgb, mode='RGB')
             filename = os.path.basename(img_path[0])
             pred_img.save(os.path.join(self.args.vis_logdir, 'raw_train_id', filename))

@@ -56,7 +56,7 @@ def stitch_test_img(color_dir, stitch_dir):
 
 
 if __name__ == "__main__":
-    vis_color_dir = '/home/lab/ygy/rssrai2019/rssrai2019_semantic_segmentation/run/rssrai2019/unet/vis_log/vis_color'
-    stitch_img_dir = '/home/lab/ygy/rssrai2019/rssrai2019_semantic_segmentation/run/rssrai2019/unet/vis_log/stitch_img'
+    vis_color_dir = '/home/lab/ygy/rssrai2019/rssrai2019_semantic_segmentation/run/rssrai2019/combine_net/vis_log/vis_color'
+    stitch_img_dir = '/home/lab/ygy/rssrai2019/rssrai2019_semantic_segmentation/run/rssrai2019/combine_net/vis_log/stitch_img'
     stitch_test_img(vis_color_dir, stitch_img_dir)
 

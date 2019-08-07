@@ -2,25 +2,23 @@
 """
 @function:
 @author:HuiYi or 会意
-@file: vis.py.py
-@time: 2019/6/23 下午7:00
+@file: train_combine_net.py
+@time: 2019/8/6 下午3:20
 """
 import argparse
 import os
 import numpy as np
 import torch
+import cv2
+from PIL import Image
 from tqdm import tqdm
 
-from mypath import Path
 from utils.saver import Saver
 from utils.summaries import TensorboardSummary
-from dataloaders import make_data_loader
 from models.backbone.UNet import UNet
-from utils.calculate_weights import calculate_weigths_labels
+from models.CombineNet import CombineNet
 from utils.loss import SegmentationLosses
 from utils.metrics import Evaluator
-# from utils.lr_scheduler import LR_Scheduler
-from models.sync_batchnorm.replicate import patch_replication_callback
 
 
 class Trainer(object):
@@ -34,62 +32,47 @@ class Trainer(object):
         self.summary = TensorboardSummary(self.saver.experiment_dir)
         self.writer = self.summary.create_summary()
 
-        # Define Dataloader
-        kwargs = {'num_workers': args.workers, 'pin_memory': True}
-        self.train_loader, self.val_loader, self.test_loader, self.nclass = make_data_loader(args, **kwargs)
-
+        self.nclass = 16
         # Define network
-        model = UNet(in_channels=4, n_classes=self.nclass, sync_bn=args.sync_bn)
-        print("using UNet")
+        self.unet_model = UNet(in_channels=4, n_classes=self.nclass)
+        self.combine_net_model = CombineNet(in_channels=96, n_classes=self.nclass)
 
-        # train_params = [{'params': model.get_params(), 'lr': args.lr}]
-        train_params = [{'params': model.get_params()}]
-
+        train_params = [{'params': self.combine_net_model.get_params()}]
         # Define Optimizer
-        # optimizer = torch.optim.SGD(train_params, momentum=args.momentum,
-        #                             weight_decay=args.weight_decay, nesterov=args.nesterov)
-        optimizer = torch.optim.Adam(train_params, self.args.learn_rate, weight_decay=args.weight_decay, amsgrad=True)
+        self.optimizer = torch.optim.Adam(train_params, self.args.learn_rate, weight_decay=args.weight_decay, amsgrad=True)
 
-        # Define Criterion
-        # whether to use class balanced weights
-        if args.use_balanced_weights:
-            classes_weights_path = os.path.join(Path.db_root_dir(args.dataset), args.dataset + '_classes_weights.npy')
-            if os.path.isfile(classes_weights_path):
-                weight = np.load(classes_weights_path)
-            else:
-                weight = calculate_weigths_labels(args.dataset, self.train_loader, self.nclass)
-            weight = torch.from_numpy(weight.astype(np.float32))
-        else:
-            weight = None
-        self.criterion = SegmentationLosses(weight=weight, cuda=args.cuda).build_loss(mode=args.loss_type)
-        self.model, self.optimizer = model, optimizer
+        self.criterion = SegmentationLosses(weight=None, cuda=args.cuda).build_loss(mode=args.loss_type)
 
         # Define Evaluator
         self.evaluator = Evaluator(self.nclass)
-        # Define lr scheduler
-        # self.scheduler = LR_Scheduler(args.lr_scheduler, args.lr, args.epochs, len(self.train_loader))
 
         # Using cuda
         if args.cuda:
-            self.model = torch.nn.DataParallel(self.model, device_ids=self.args.gpu_ids)
-            patch_replication_callback(self.model)
-            self.model = self.model.cuda()
+            self.unet_model = self.unet_model.cuda()
+            self.combine_net_model = self.combine_net_model.cuda()
 
-        # Resuming checkpoint
+        # Load Unet checkpoint
+        if not os.path.isfile(args.checkpoint_file):
+            raise RuntimeError("=> no Unet checkpoint found at '{}'".format(args.checkpoint_file))
+        checkpoint = torch.load(args.checkpoint_file)
+        self.unet_model.load_state_dict(checkpoint['state_dict'])
+        print("=> loaded Unet checkpoint '{}'".format(args.checkpoint_file))
+
+        # Resuming combineNet checkpoint
         self.best_pred = 0.0
         if args.resume is not None:
             if not os.path.isfile(args.resume):
-                raise RuntimeError("=> no checkpoint found at '{}'" .format(args.resume))
+                raise RuntimeError("=> no combineNet checkpoint found at '{}'" .format(args.resume))
             checkpoint = torch.load(args.resume)
             args.start_epoch = checkpoint['epoch']
             if args.cuda:
-                self.model.module.load_state_dict(checkpoint['state_dict'])
+                self.combine_net_model.module.load_state_dict(checkpoint['state_dict'])
             else:
-                self.model.load_state_dict(checkpoint['state_dict'])
+                self.combine_net_model.load_state_dict(checkpoint['state_dict'])
             if not args.ft:
                 self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.best_pred = checkpoint['best_pred']
-            print("=> loaded checkpoint '{}' (epoch {})"
+            print("=> loaded combineNet checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
 
         # Clear start epoch if fine-tuning
@@ -97,21 +80,27 @@ class Trainer(object):
             args.start_epoch = 0
 
     def training(self, epoch):
-        print('[Epoch: %d, learning rate: %.6f, previous best = %.4f]' % (epoch, self.args.learn_rate, self.best_pred))
+        print('[Epoch: %d, previous best = %.4f]' % (epoch, self.best_pred))
         train_loss = 0.0
-        self.model.train()
+        self.combine_net_model.train()
         self.evaluator.reset()
-        tbar = tqdm(self.train_loader)
-        num_img_tr = len(self.train_loader)
+        num_img_tr = len(train_files)
+        tbar = tqdm(train_files, desc='\r')
 
-        for i, sample in enumerate(tbar):
-            image, target = sample['image'], sample['label']
-            if self.args.cuda:
-                image, target = image.cuda(), target.cuda()
-            # self.scheduler(self.optimizer, i, epoch, self.best_pred)
+        for i, filename in enumerate(tbar):
+            image = Image.open(os.path.join(train_dir, filename))
+            label = Image.open(os.path.join(train_label_dir, os.path.basename(filename)[:-4] + '_labelTrainIds.png'))
+            label = np.array(label).astype(np.float32)
+            label = label.reshape((1, 400, 400))
+            label = torch.from_numpy(label).float()
+            label = label.cuda()
+
+            # UNet_multi_scale_predict
+            unt_pred = self.unet_multi_scale_predict(image)
+
             self.optimizer.zero_grad()
-            output = self.model(image)
-            loss = self.criterion(output, target)
+            output = self.combine_net_model(unt_pred)
+            loss = self.criterion(output, label)
             loss.backward()
             self.optimizer.step()
             train_loss += loss.item()
@@ -119,10 +108,10 @@ class Trainer(object):
             self.writer.add_scalar('train/total_loss_iter', loss.item(), i + num_img_tr * epoch)
 
         pred = output.data.cpu().numpy()
-        target = target.cpu().numpy()
+        label = label.cpu().numpy()
         pred = np.argmax(pred, axis=1)
         # Add batch sample into evaluator
-        self.evaluator.add_batch(target, pred)
+        self.evaluator.add_batch(label, pred)
 
         # Fast test during the training
         Acc = self.evaluator.Pixel_Accuracy()
@@ -142,26 +131,33 @@ class Trainer(object):
 
     def validation(self, epoch):
         test_loss = 0.0
-        self.model.eval()
+        self.combine_net_model.eval()
         self.evaluator.reset()
-        tbar = tqdm(self.val_loader, desc='\r')
-        num_img_val = len(self.val_loader)
+        tbar = tqdm(val_files, desc='\r')
+        num_img_val = len(val_files)
 
-        for i, sample in enumerate(tbar):
-            image, target = sample['image'], sample['label']
-            if self.args.cuda:
-                image, target = image.cuda(), target.cuda()
+        for i, filename in enumerate(tbar):
+            image = Image.open(os.path.join(val_dir, filename))
+            label = Image.open(os.path.join(val_label_dir, os.path.basename(filename)[:-4] + '_labelTrainIds.png'))
+            label = np.array(label).astype(np.float32)
+            label = label.reshape((1, 400, 400))
+            label = torch.from_numpy(label).float()
+            label = label.cuda()
+
+            # UNet_multi_scale_predict
+            unt_pred = self.unet_multi_scale_predict(image)
+
             with torch.no_grad():
-                output = self.model(image)
-            loss = self.criterion(output, target)
+                output = self.combine_net_model(unt_pred)
+            loss = self.criterion(output, label)
             test_loss += loss.item()
             tbar.set_description('Test loss: %.5f' % (test_loss / (i + 1)))
             self.writer.add_scalar('val/total_loss_iter', loss.item(), i + num_img_val * epoch)
             pred = output.data.cpu().numpy()
-            target = target.cpu().numpy()
+            label = label.cpu().numpy()
             pred = np.argmax(pred, axis=1)
             # Add batch sample into evaluator
-            self.evaluator.add_batch(target, pred)
+            self.evaluator.add_batch(label, pred)
 
         # Fast test during the training
         Acc = self.evaluator.Pixel_Accuracy()
@@ -184,30 +180,91 @@ class Trainer(object):
             self.best_pred = new_pred
             self.saver.save_checkpoint({
                 'epoch': epoch + 1,
-                'state_dict': self.model.module.state_dict(),
+                'state_dict': self.combine_net_model.state_dict(),
                 'optimizer': self.optimizer.state_dict(),
                 'best_pred': self.best_pred,
             }, is_best)
 
+    def unet_multi_scale_predict(self, image_ori: Image):
+        self.unet_model.eval()
+
+        # 预测原图
+        sample_ori = image_ori.copy()
+        output_ori = self.unet_predict(sample_ori)
+
+        # 预测旋转三个
+        angle_list = [90, 180, 270]
+        for angle in angle_list:
+            img_rotate = image_ori.rotate(angle, Image.BILINEAR)
+            output = self.unet_predict(img_rotate)
+            pred = output.data.cpu().numpy()[0]
+            pred = pred.transpose((1, 2, 0))
+            m_rotate = cv2.getRotationMatrix2D((200, 200), 360.0 - angle, 1)
+            pred = cv2.warpAffine(pred, m_rotate, (400, 400))
+            pred = pred.transpose((2, 0, 1))
+            output = torch.from_numpy(np.array([pred, ])).float()
+            output_ori = torch.cat([output_ori, output.cuda()], 1)
+
+        # 预测竖直翻转
+        img_flip = image_ori.transpose(Image.FLIP_TOP_BOTTOM)
+        output = self.unet_predict(img_flip)
+        pred = output.data.cpu().numpy()[0]
+        pred = pred.transpose((1, 2, 0))
+        pred = cv2.flip(pred, 0)
+        pred = pred.transpose((2, 0, 1))
+        output = torch.from_numpy(np.array([pred, ])).float()
+        output_ori = torch.cat([output_ori, output.cuda()], 1)
+
+        # 预测水平翻转
+        img_flip = image_ori.transpose(Image.FLIP_LEFT_RIGHT)
+        output = self.unet_predict(img_flip)
+        pred = output.data.cpu().numpy()[0]
+        pred = pred.transpose((1, 2, 0))
+        pred = cv2.flip(pred, 1)
+        pred = pred.transpose((2, 0, 1))
+        output = torch.from_numpy(np.array([pred, ])).float()
+        output_ori = torch.cat([output_ori, output.cuda()], 1)
+
+        return output_ori
+
+    def unet_predict(self, img: Image) -> torch.Tensor:
+        img = self.transform_test(img)
+        if self.args.cuda:
+            img = img.cuda()
+        with torch.no_grad():
+            output = self.unet_model(img)
+        return output
+
+    @staticmethod
+    def transform_test(img):
+        # Normalize
+        mean = (0.544650, 0.352033, 0.384602, 0.352311)
+        std = (0.249456, 0.241652, 0.228824, 0.227583)
+        img = np.array(img).astype(np.float32)
+        img /= 255.0
+        img -= mean
+        img /= std
+        # ToTensor
+        img = img.transpose((2, 0, 1))
+        img = np.array([img, ])
+        img = torch.from_numpy(img).float()
+        return img
+
 
 def main():
-    parser = argparse.ArgumentParser(description="PyTorch Unet Training")
-    parser.add_argument('--backbone', type=str, default='unet',
-                        choices=['unet', 'unetNested'],
-                        help='backbone name (default: unet)')
+    parser = argparse.ArgumentParser(description="PyTorch CombineNet Training")
+    parser.add_argument('--backbone', type=str, default='combine_net',
+                        choices=['combine_net'],
+                        help='backbone name (default: combine_net)')
     parser.add_argument('--dataset', type=str, default='rssrai2019',
                         choices=['rssrai2019'],
                         help='dataset name (default: rssrai2019)')
-    parser.add_argument('--workers', type=int, default=4,
+    parser.add_argument('--workers', type=int, default=2,
                         metavar='N', help='dataloader threads')
     parser.add_argument('--base-size', type=int, default=400,
                         help='base image size')
     parser.add_argument('--crop-size', type=int, default=400,
                         help='crop image size')
-    parser.add_argument('--sync-bn', type=bool, default=None,
-                        help='whether to use sync bn (default: auto)')
-    parser.add_argument('--freeze-bn', type=bool, default=False,
-                        help='whether to freeze bn parameters (default: False)')
     parser.add_argument('--loss-type', type=str, default='ce',
                         choices=['ce', 'focal'],
                         help='loss func type (default: ce)')
@@ -216,24 +273,12 @@ def main():
                         help='number of epochs to train (default: auto)')
     parser.add_argument('--start_epoch', type=int, default=0, metavar='N',
                         help='start epochs (default:0)')
-    parser.add_argument('--batch-size', type=int, default=None, metavar='N',
-                        help='input batch size for training (default: auto)')
-    parser.add_argument('--test-batch-size', type=int, default=None, metavar='N',
-                        help='input batch size for testing (default: auto)')
-    parser.add_argument('--use-balanced-weights', action='store_true', default=False,
-                        help='whether to use balanced weights (default: False)')
+
     # optimizer params
     parser.add_argument('--learn-rate', type=float, default=None, metavar='LR',
                         help='learning rate (default: auto)')
-    parser.add_argument('--lr-scheduler', type=str, default='poly',
-                        choices=['poly', 'step', 'cos'],
-                        help='lr scheduler mode: (default: poly)')
-    parser.add_argument('--momentum', type=float, default=0.9,
-                        metavar='M', help='momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=5e-4,
                         metavar='M', help='w-decay (default: 5e-4)')
-    parser.add_argument('--nesterov', action='store_true', default=True,
-                        help='whether use nesterov (default: False)')
     # cuda, seed and logging
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
@@ -242,8 +287,10 @@ def main():
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
     # checking point
+    parser.add_argument('--checkpoint_file', type=str, default=None,
+                        help='put the path to Unet checkpoint file')
     parser.add_argument('--resume', type=str, default=None,
-                        help='put the path to resuming file if needed')
+                        help='put the path to combineNet resuming file if needed')
     parser.add_argument('--checkname', type=str, default=None,
                         help='set the checkpoint name')
     # finetuning pre-trained models
@@ -263,29 +310,14 @@ def main():
         except ValueError:
             raise ValueError('Argument --gpu_ids must be a comma-separated list of integers only')
 
-    if args.sync_bn is None:
-        if args.cuda and len(args.gpu_ids) > 1:
-            args.sync_bn = True
-        else:
-            args.sync_bn = False
-
     # default settings for epochs, batch_size and lr
     if args.epochs is None:
         epoches = {'rssrai2019': 100}
         args.epochs = epoches[args.dataset.lower()]
 
-    if args.batch_size is None:
-        args.batch_size = 4 * len(args.gpu_ids)
-
-    if args.test_batch_size is None:
-        args.test_batch_size = args.batch_size
-
     if args.learn_rate is None:
-        lrs = {'rssrai2019': 0.01}
+        lrs = {'rssrai2019': 0.001}
         args.learn_rate = lrs[args.dataset.lower()] / (4 * len(args.gpu_ids)) * args.batch_size
-
-    if args.checkname is None:
-        args.checkname = str(args.backbone)
 
     print(args)
     torch.manual_seed(args.seed)
@@ -302,4 +334,11 @@ def main():
 
 
 if __name__ == "__main__":
+    train_dir = r'/home/lab/ygy/rssrai2019/datasets/image/train_mix'
+    train_label_dir = r'/home/lab/ygy/rssrai2019/datasets/label/train_mix_id_image'
+    val_dir = r'/home/lab/ygy/rssrai2019/datasets/image/val_mix'
+    val_label_dir = r'/home/lab/ygy/rssrai2019/datasets/label/val_mix_id_image'
+
+    train_files = os.listdir(train_dir)
+    val_files = os.listdir(val_dir)
     main()
