@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from models.utils.layers import UnetConv2, UnetUp
-from models.utils.utils import init_weights, count_param
+from models.utils.utils import count_param
 from models.sync_batchnorm.batchnorm import SynchronizedBatchNorm2d
 
 
@@ -51,15 +51,7 @@ class UNetNested(nn.Module):
         self.final_4 = nn.Conv2d(filters[0], n_classes, 1)
 
         # initialise weights
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                torch.nn.init.kaiming_normal_(m.weight)
-            elif isinstance(m, SynchronizedBatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
+        self._init_weight()
 
     def forward(self, inputs):
         # column : 0
@@ -99,6 +91,29 @@ class UNetNested(nn.Module):
             return final
         else:
             return final_4
+
+    def _init_weight(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, nn.ConvTranspose2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, nn.UpsamplingBilinear2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, SynchronizedBatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+    def get_params(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.UpsamplingBilinear2d) \
+                    or isinstance(m, SynchronizedBatchNorm2d) or isinstance(m, nn.BatchNorm2d):
+                for p in m.parameters():
+                    if p.requires_grad:
+                        yield p
 
 
 if __name__ == '__main__':

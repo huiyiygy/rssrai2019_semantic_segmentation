@@ -15,3 +15,6 @@
 # experiment 4  实验3 L2系数过大导致精度过低，将其继续缩小10倍。学习率更新改为每次0.3倍，增加epoch数量
 # CUDA_VISIBLE_DEVICES=0,1 python train.py --learn-rate 0.001 --weight-decay 1e-5 --epochs 1500 --batch-size 20 --test-batch-size 20 --base-size 400 --crop-size 400 --gpu-ids 0,1 --checkname unet --eval-interval 1 --dataset rssrai2019
 
+# experiment 5  使用UNetNested网络训练
+CUDA_VISIBLE_DEVICES=0,1 python train.py --learn-rate 0.001 --weight-decay 0 --epochs 1000 --batch-size 12 --test-batch-size 12 --base-size 400 --crop-size 400 --gpu-ids 0,1 --backbone unetNested --checkname unetNested --eval-interval 1 --dataset rssrai2019
+

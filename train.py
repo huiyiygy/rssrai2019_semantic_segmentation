@@ -16,6 +16,7 @@ from utils.saver import Saver
 from utils.summaries import TensorboardSummary
 from dataloaders import make_data_loader
 from models.backbone.UNet import UNet
+from models.backbone.UNetNested import UNetNested
 from utils.calculate_weights import calculate_weigths_labels
 from utils.loss import SegmentationLosses
 from utils.metrics import Evaluator
@@ -38,9 +39,14 @@ class Trainer(object):
         kwargs = {'num_workers': args.workers, 'pin_memory': True}
         self.train_loader, self.val_loader, self.test_loader, self.nclass = make_data_loader(args, **kwargs)
 
+        model = None
         # Define network
-        model = UNet(in_channels=4, n_classes=self.nclass, sync_bn=args.sync_bn)
-        print("using UNet")
+        if self.args.backbone == 'unet':
+            model = UNet(in_channels=4, n_classes=self.nclass, sync_bn=args.sync_bn)
+            print("using UNet")
+        if self.args.backbone == 'unetNested':
+            model = UNetNested(in_channels=4, n_classes=self.nclass, sync_bn=args.sync_bn)
+            print("using UNetNested")
 
         # train_params = [{'params': model.get_params(), 'lr': args.lr}]
         train_params = [{'params': model.get_params()}]

@@ -14,6 +14,7 @@ from PIL import Image
 
 from dataloaders import make_data_loader
 from models.backbone.UNet import UNet
+from models.backbone.UNetNested import UNetNested
 
 from dataloaders.utils import decode_segmap
 
@@ -26,8 +27,14 @@ class Visualization(object):
         kwargs = {'num_workers': args.workers, 'pin_memory': True}
         _, _, self.test_loader, self.nclass = make_data_loader(args, **kwargs)
 
+        self.model = None
         # Define network
-        self.model = UNet(in_channels=4, n_classes=self.nclass, sync_bn=False)
+        if self.args.backbone == 'unet':
+            self.model = UNet(in_channels=4, n_classes=self.nclass)
+            print("using UNet")
+        if self.args.backbone == 'unetNested':
+            self.model = UNetNested(in_channels=4, n_classes=self.nclass)
+            print("using UNetNested")
 
         # Using cuda
         if args.cuda:
@@ -61,7 +68,8 @@ class Visualization(object):
             pred_img.save(os.path.join(self.args.vis_logdir, 'raw_train_id', filename))
             rgb_img.save(os.path.join(self.args.vis_logdir, 'vis_color', filename))
 
-    def transform_test(self, img):
+    @staticmethod
+    def transform_test(img):
         # Normalize
         mean = (0.544650, 0.352033, 0.384602, 0.352311)
         std = (0.249456, 0.241652, 0.228824, 0.227583)
@@ -141,7 +149,7 @@ class Visualization(object):
 def main():
     parser = argparse.ArgumentParser(description="PyTorch DeeplabV3Plus Training")
     parser.add_argument('--backbone', type=str, default='unet',
-                        choices=['unet'],
+                        choices=['unet', 'unetNested'],
                         help='backbone name (default: resnet)')
     parser.add_argument('--dataset', type=str, default='rssrai2019',
                         choices=['rssrai2019'],
