@@ -14,6 +14,7 @@ import cv2
 from PIL import Image
 
 from models.backbone.UNet import UNet
+from models.backbone.UNetNested import UNetNested
 from models.CombineNet import CombineNet
 
 from dataloaders.utils import decode_segmap
@@ -26,20 +27,30 @@ class Visualization:
         self.nclass = 16
         # Define network
         self.unet_model = UNet(in_channels=4, n_classes=self.nclass)
-        self.combine_net_model = CombineNet(in_channels=96, n_classes=self.nclass)
+        self.unetNested_model = UNetNested(in_channels=4, n_classes=self.nclass)
+        self.combine_net_model = CombineNet(in_channels=192, n_classes=self.nclass)
 
         # Using cuda
         if args.cuda:
             self.unet_model = self.unet_model.cuda()
+            self.unetNested_model = self.unetNested_model.cuda()
             self.combine_net_model = self.combine_net_model.cuda()
 
-        # Load model
+        # Load Unet model
         if not os.path.isfile(args.unet_checkpoint_file):
             raise RuntimeError("=> no unet checkpoint found at '{}'".format(args.unet_checkpoint_file))
         checkpoint = torch.load(args.unet_checkpoint_file)
         self.unet_model.load_state_dict(checkpoint['state_dict'])
         print("=> loaded unet checkpoint '{}'".format(args.unet_checkpoint_file))
 
+        # Load UNetNested model
+        if not os.path.isfile(args.unetNested_checkpoint_file):
+            raise RuntimeError("=> no UNetNested checkpoint found at '{}'".format(args.unetNested_checkpoint_file))
+        checkpoint = torch.load(args.unetNested_checkpoint_file)
+        self.unetNested_model.load_state_dict(checkpoint['state_dict'])
+        print("=> loaded UNetNested checkpoint '{}'".format(args.unetNested_checkpoint_file))
+
+        # Load Combine Net
         if not os.path.isfile(args.combine_net_checkpoint_file):
             raise RuntimeError("=> no combine net checkpoint found at '{}'".format(args.combine_net_checkpoint_file))
         checkpoint = torch.load(args.combine_net_checkpoint_file)
@@ -56,8 +67,13 @@ class Visualization:
             # UNet_multi_scale_predict
             unt_pred = self.unet_multi_scale_predict(image)
 
+            # UNetNested_multi_scale_predict
+            unetnested_pred = self.unetnested_multi_scale_predict(image)
+
+            net_input = torch.cat([unt_pred, unetnested_pred], 1)
+
             with torch.no_grad():
-                output = self.combine_net_model(unt_pred)
+                output = self.combine_net_model(net_input)
             pred = output.data.cpu().numpy()[0]
             pred = np.argmax(pred, axis=0)
 
@@ -119,6 +135,56 @@ class Visualization:
             output = self.unet_model(img)
         return output
 
+    def unetnested_predict(self, img: Image) -> torch.Tensor:
+        img = self.transform_test(img)
+        if self.args.cuda:
+            img = img.cuda()
+        with torch.no_grad():
+            output = self.unetNested_model(img)
+        return output
+
+    def unetnested_multi_scale_predict(self, image_ori: Image):
+        self.unetNested_model.eval()
+
+        # 预测原图
+        sample_ori = image_ori.copy()
+        output_ori = self.unetnested_predict(sample_ori)
+
+        # 预测旋转三个
+        angle_list = [90, 180, 270]
+        for angle in angle_list:
+            img_rotate = image_ori.rotate(angle, Image.BILINEAR)
+            output = self.unetnested_predict(img_rotate)
+            pred = output.data.cpu().numpy()[0]
+            pred = pred.transpose((1, 2, 0))
+            m_rotate = cv2.getRotationMatrix2D((200, 200), 360.0 - angle, 1)
+            pred = cv2.warpAffine(pred, m_rotate, (400, 400))
+            pred = pred.transpose((2, 0, 1))
+            output = torch.from_numpy(np.array([pred, ])).float()
+            output_ori = torch.cat([output_ori, output.cuda()], 1)
+
+        # 预测竖直翻转
+        img_flip = image_ori.transpose(Image.FLIP_TOP_BOTTOM)
+        output = self.unetnested_predict(img_flip)
+        pred = output.data.cpu().numpy()[0]
+        pred = pred.transpose((1, 2, 0))
+        pred = cv2.flip(pred, 0)
+        pred = pred.transpose((2, 0, 1))
+        output = torch.from_numpy(np.array([pred, ])).float()
+        output_ori = torch.cat([output_ori, output.cuda()], 1)
+
+        # 预测水平翻转
+        img_flip = image_ori.transpose(Image.FLIP_LEFT_RIGHT)
+        output = self.unetnested_predict(img_flip)
+        pred = output.data.cpu().numpy()[0]
+        pred = pred.transpose((1, 2, 0))
+        pred = cv2.flip(pred, 1)
+        pred = pred.transpose((2, 0, 1))
+        output = torch.from_numpy(np.array([pred, ])).float()
+        output_ori = torch.cat([output_ori, output.cuda()], 1)
+
+        return output_ori
+
     @staticmethod
     def transform_test(img):
         # Normalize
@@ -146,6 +212,8 @@ def main():
 
     parser.add_argument('--unet_checkpoint_file', type=str, default=None,
                         help='put the path to UNet checkpoint file')
+    parser.add_argument('--unetNested_checkpoint_file', type=str, default=None,
+                        help='put the path to UNetNested checkpoint file')
     parser.add_argument('--combine_net_checkpoint_file', type=str, default=None,
                         help='put the path to combineNet checkpoint file')
     parser.add_argument('--vis_logdir', type=str, default=None,
@@ -159,7 +227,7 @@ def main():
 
 
 if __name__ == "__main__":
-    test_dir = r'/home/lab/ygy/rssrai2019/datasets/image/test_mix'
+    test_dir = r'/home/lab/ygy/rssrai2019/datasets/image/test_overlay_crop'
 
     test_files = os.listdir(test_dir)
 

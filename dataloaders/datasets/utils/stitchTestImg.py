@@ -1,4 +1,7 @@
 # -*- coding:utf-8 -*-
+"""
+将裁剪的图片拼接回大图
+"""
 import os
 from PIL import Image
 import numpy as np
@@ -6,9 +9,11 @@ import numpy as np
 test_img_num = 10
 
 rows, cols = 6800, 7200
+# stride = 400
+stride = 200
 crop_rows, crop_cols = 400, 400
-rows_num = rows // crop_rows
-cols_num = cols // crop_cols
+rows_num = (rows - crop_rows) // stride + 1
+cols_num = (cols - crop_cols) // stride + 1
 
 test_img_name = [
     'GF2_PMS1__20150902_L1A0001015646-MSS1',
@@ -39,9 +44,9 @@ def stitch_test_img(color_dir, stitch_dir):
             crop_img_pil = crop_img_pil.resize((crop_rows, crop_cols), Image.NEAREST)
             crop_img_np = np.array(crop_img_pil, dtype=np.uint8)
             # 将小图放入大图中
-            a0 = row * crop_rows
+            a0 = row * stride
             a1 = a0 + crop_rows
-            b0 = col * crop_cols
+            b0 = col * stride
             b1 = b0 + crop_cols
             test_img_np[a0:a1, b0:b1, :] = crop_img_np
             # 更新行列
